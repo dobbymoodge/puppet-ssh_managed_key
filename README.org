@@ -1,0 +1,106 @@
+#+TITLE: Ssh_managed_key module for Puppet
+
+* Description
+This module automates the process of generating a public/private SSH key pair and distributing the public key among target users@hosts under Puppet control. Use of this module assumes 3 host roles:
+- Client :: the private key holder, origin of SSH connections
+  
+- Server :: the public key holder, endpoint for SSH connections
+
+- Key Master :: hosts the public key store; should have passwordless remote root SSH to Client and Server hosts already configured. Assumed to be the puppet master
+
+* Usage
+** Primary resources
+   :PROPERTIES:
+   :CUSTOM_ID: primary_resources
+   :END:
+The class [[#key_master][key_master]] and defined resource [[#key_pair][key_pair]] are the primary means for using this module. Their usage is outlined below. The other resources in this module provide the "moving parts" which make key synchronization work; they shouldn't be used directly and doing so it at your own risk. These "internal" resources are documented in the [[#internal_resources][Internal Resources]] section.
+
+*** Example nodes.pp:
+#+begin_src puppet
+ node puppet_master {
+     include ssh_managed_key::key_master
+     ...
+ }
+
+ node client_host {
+     include ssh_managed_key
+     ssh_managed_key::key_pair { "production_db_backup":
+         ensure     => present,
+         local_user => "db",
+     }
+ }
+
+ node server_host {
+     include ssh_managed_key
+     ssh_managed_key::Public_key <<| title == "production_db_backup" |>> {
+         user  => "backup",
+     }
+ }
+#+end_src
+
+*** ssh_managed_key::key_master
+    :PROPERTIES:
+    :CUSTOM_ID: key_master
+    :END:
+
+Implements a central public key aggregator for the =ssh_managed_key= class. In general, this class should only be included on the puppet master.
+
+#+begin_src puppet
+ include ssh_managed_key::key_master
+#+end_src
+
+*** ssh_managed_key::key_pair
+    :PROPERTIES:
+    :CUSTOM_ID: key_pair
+    :END:
+
+Manages a private/public ssh key pair on per-key and per-user basis.
+
+Allows specification of local user (private key holder) and remote user (public key holder), SSH key type and bit length (a la ssh_authorized_key), target filenames for private and public keys, and public key options.
+
+#+begin_src puppet
+ # Create a key pair for user "db" with as many defaults as possible
+ ssh_managed_key::key_pair { "production_db_backup":
+     ensure     => present,
+     local_user => "db",
+ }
+
+ # Create a key pair for user "test" with a specific private key
+ # filename (for specification with "ssh -i") and key type of DSA
+ ssh_managed_key::key_pair { "dsa_test_key":
+     ensure         => present,
+     local_user     => "test",
+     privkey_target => "web_sync",
+     type           => "dsa",
+ }
+
+#+end_src
+
+** Internal Resources
+   :PROPERTIES:
+   :CUSTOM_ID: internal_resources
+   :END: 
+*** ssh_managed_key::key_master_sync
+    :PROPERTIES:
+    :CUSTOM_ID: key_master_sync
+    :END:
+
+Collects new public keys from hosts for storage in central keystore (see [[#key_master][key_master]]).
+
+This resource should not be used directly, it is created by the [[#key_pair][key_pair]] resource
+
+*** ssh_managed_key::private_key
+    :PROPERTIES:
+    :CUSTOM_ID: private_key
+    :END:
+Manages a private ssh key similar to the Puppet built-in [[http://docs.puppetlabs.com/references/stable/type.html#sshauthorizedkey][ssh_authorized_key]]
+
+This resource should not be used directly, it is created by the [[#key_pair][key_pair]] resource
+
+*** ssh_managed_key::public_key
+    :PROPERTIES:
+    :CUSTOM_ID: public_key
+    :END:
+Wraps builtin [[http://docs.puppetlabs.com/references/stable/type.html#sshauthorizedkey][ssh_authorized_key]] for use with =ssh_managed_key=
+
+This resource should not be used directly, it is created by the [[#key_pair][key_pair]] resource
